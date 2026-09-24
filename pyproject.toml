@@ -1,0 +1,8 @@
+[project]
+name = "thermal-testing"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "adbutils>=2.12.0",
+    "uiautomator2>=3.7.0",
+]
