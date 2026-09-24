@@ -49,25 +49,50 @@ The port can change when the phone restarts or Wi-Fi reconnects. If that happens
 
 The first time a command controls the phone, `uiautomator2` installs a small helper app on it. Accept the prompt if one appears.
 
-## Thermal camera routine
+## Thermal camera routines
 
-For the **Infrared Thermal Imager** app, plug the thermal camera into the phone, then run:
+For the **Infrared Thermal Imager** app, plug the thermal camera into the phone and pick a routine:
 
 ```bash
-uv run python phonectl.py run thermal_imager                           # one photo
-uv run python phonectl.py run thermal_imager --count 10 --interval 30  # 10 photos, 30 s apart
+uv run python phonectl.py run thermal_imager                                     # one photo
+uv run python phonectl.py run thermal_imager timed --interval 10s --duration 5m  # every 10 s for 5 minutes
+uv run python phonectl.py run thermal_imager continuous --interval 30s           # every 30 s until you press Ctrl+D
 ```
 
-The routine opens the app, taps its camera button, and copies each photo from the phone into `photos/thermal_imager/`.
+| Routine | What it does | Needs |
+|---|---|---|
+| `photo` (default) | Takes one photo, or `--count N` photos `--interval` apart | nothing |
+| `timed` | Takes a photo every `--interval` until `--duration` has passed | `--interval`, `--duration` |
+| `continuous` | Takes a photo every `--interval` until you press **Ctrl+D** | `--interval` |
+
+Each routine opens the app, taps its camera button, and copies each photo from the phone into `photos/thermal_imager/`. Each photo prints a timestamped line, like this:
+
+```
+Taking a photo every 5s for 12s. Press Ctrl+C to stop early.
+[15:53:06] #1 saved photos/thermal_imager/2026-09-24-15-53-03-33405.jpg
+[15:53:11] #2 saved photos/thermal_imager/2026-09-24-15-53-08-4c0db.jpg
+[15:53:17] #3 saved photos/thermal_imager/2026-09-24-15-53-13-77801.jpg
+Done: 3 photos.
+```
+
+Times can be plain seconds or use units: `90`, `30s`, `5m`, `1h30m`.
+
+How the timing works:
+
+- **Photos stay on schedule.** They're taken at 0, interval, 2 × interval, and so on from the start, so the time each photo takes doesn't add drift.
+- **`timed` doesn't take a photo at the end.** It takes photos at the scheduled times before the duration ends. For example, `--interval 10s --duration 1m` takes 6 photos, at 0, 10, 20, 30, 40 and 50 s.
+- **Keep the interval at 5 s or more.** Each photo takes about 4 s, including copying it to the computer. If a photo is still going when the next one is due, that time slot is skipped instead of photos piling up.
+- **The app is reopened if needed.** If the app is closed or goes to the background during a run, the next photo reopens it. If the camera button still can't be found, that photo is logged as skipped and the run continues.
+- **Stopping.** Ctrl+C stops any routine. In `continuous`, Ctrl+D stops it after the current photo. On Windows, press Ctrl+Z and then Enter instead of Ctrl+D. Because `continuous` watches what you type, don't run it with its input redirected (for example from `/dev/null`); it would stop after the first photo.
+- **Long runs.** The phone must stay unlocked, so turn off the lock screen for long runs.
 
 Options:
 
-- `--count N`: how many photos to take. The default is 1.
-- `--interval S`: seconds between photos.
+- `--count N`: how many photos the `photo` routine takes. The default is 1.
 - `--outdir DIR`: save photos in `DIR/thermal_imager/` instead of `photos/thermal_imager/`.
 - `--no-pull`: take the photos but leave them on the phone, in `DCIM/DYTCamera`.
 
-To see which apps have a routine, run `uv run python phonectl.py routines`.
+To list apps and their routines, run `uv run python phonectl.py routines`.
 
 ### Adding a routine for another app
 
@@ -75,7 +100,8 @@ Each app has its own module in `apps/`, and photos are saved under `photos/<app 
 
 1. Copy `apps/thermal_imager.py` to `apps/<name>.py`.
 2. Update `NAME`, `TITLE`, `PACKAGE` and `PHOTO_DIR`, and change the control IDs to the ones you found with `dump`.
-3. Add the module to `APPS` in `apps/__init__.py`.
+3. Edit its routines and the `ROUTINES` dict. The first entry is the default. The shared scheduling helpers `repeat` and `stop_on_eof` are in `device.py`.
+4. Add the module to `APPS` in `apps/__init__.py`.
 
 ## Take a picture with any app
 
@@ -135,8 +161,8 @@ uv run python phonectl.py --serial 192.168.1.50:41234 shoot com.example.cam --xy
 | Path | What it is |
 |---|---|
 | `phonectl.py` | The command-line tool |
-| `device.py` | Phone helpers shared by all apps: connect, open an app, tap, copy photos |
-| `apps/` | One module per app, each with its package name, button IDs and routine |
+| `device.py` | Phone helpers shared by all apps: connect, open an app, tap, copy photos, repeat on a schedule |
+| `apps/` | One module per app, each with its package name, button IDs and routines |
 | `photos/<app>/` | Photos copied from the phone, one folder per app (not committed) |
 
 ## Troubleshooting

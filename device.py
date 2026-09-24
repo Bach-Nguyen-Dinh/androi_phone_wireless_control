@@ -1,7 +1,9 @@
 """Phone helpers shared by the CLI and the app routines."""
 
+import math
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -9,6 +11,10 @@ import adbutils
 import uiautomator2 as u2
 
 ADB = adbutils.adb_path()
+
+
+class ControlNotFound(Exception):
+    pass
 
 
 def adb(*args):
@@ -42,9 +48,9 @@ def tap(d, text=None, desc=None, id=None, xy=None, timeout=10):
     elif id:
         el = d(resourceId=id)
     else:
-        sys.exit("Give one of --text, --desc, --id or --xy")
+        raise ValueError("Give one of --text, --desc, --id or --xy")
     if not el.wait(timeout=timeout):
-        sys.exit("Control not found on screen. Run `dump` to inspect the UI.")
+        raise ControlNotFound("Control not found on screen. Run `dump` to inspect the UI.")
     el.click()
 
 
@@ -65,3 +71,39 @@ def pull_new_photo(d, before, outdir, photo_dir="/sdcard/DCIM/*", timeout=10):
             d.pull(newest, str(dest))
             return dest
     return None
+
+
+def stop_on_eof():
+    """Return an Event that is set when stdin reaches EOF (Ctrl+D; Ctrl+Z then Enter on Windows)."""
+    stop = threading.Event()
+
+    def watch():
+        sys.stdin.read()
+        stop.set()
+
+    threading.Thread(target=watch, daemon=True).start()
+    return stop
+
+
+def repeat(action, interval, duration=None, stop=None):
+    """Call action(i) at t = 0, interval, 2*interval, ... until `duration` seconds or `stop` is set.
+
+    If an action overruns its slot, the next call waits for the following slot
+    rather than bunching up. Ctrl+C also stops. Returns the number of calls made.
+    """
+    stop = stop or threading.Event()
+    start = time.monotonic()
+    calls = slot = 0
+    try:
+        while not stop.is_set():
+            action(calls)
+            calls += 1
+            elapsed = time.monotonic() - start
+            slot = max(slot + 1, math.ceil(elapsed / interval))
+            next_at = slot * interval
+            if duration is not None and next_at >= duration:
+                break
+            stop.wait(next_at - elapsed)
+    except KeyboardInterrupt:
+        print()
+    return calls
